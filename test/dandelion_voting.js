@@ -26,7 +26,7 @@ const VOTER_STATE = ['ABSENT', 'YEA', 'NAY'].reduce((state, key, index) => {
   return state
 }, {})
 
-contract('Voting App', ([root, holder1, holder2, holder20, holder29, holder51, nonHolder]) => {
+contract('Dandelion Voting App', ([root, holder1, holder2, holder20, holder29, holder51, nonHolder]) => {
   let votingBase, voting, token, executionTarget, agreement, collateralToken
   let CREATE_VOTES_ROLE, MODIFY_SUPPORT_ROLE, MODIFY_QUORUM_ROLE, MODIFY_BUFFER_BLOCKS_ROLE,
     MODIFY_EXECUTION_DELAY_ROLE, SET_AGREEMENT_ROLE, CHALLENGE_ROLE
@@ -41,15 +41,16 @@ contract('Voting App', ([root, holder1, holder2, holder20, holder29, holder51, n
 
     // Voting errors
     DANDELION_VOTING_NO_VOTE: 'DANDELION_VOTING_NO_VOTE',
-    DANDELION_VOTING_VOTE_ID_ZERO: 'DANDELION_VOTING_VOTE_ID_ZERO',
+    DANDELION_VOTING_TOKEN_NOT_CONTRACT: 'DANDELION_VOTING_TOKEN_NOT_CONTRACT',
     DANDELION_VOTING_INIT_PCTS: 'DANDELION_VOTING_INIT_PCTS',
+    DANDELION_VOTING_INIT_SUPPORT_TOO_BIG: 'DANDELION_VOTING_INIT_SUPPORT_TOO_BIG',
+    DANDELION_VOTING_DURATION_BLOCKS_ZERO: 'DANDELION_VOTING_DURATION_BLOCKS_ZERO',
     DANDELION_VOTING_CHANGE_SUPPORT_PCTS: 'DANDELION_VOTING_CHANGE_SUPPORT_PCTS',
     DANDELION_VOTING_CHANGE_QUORUM_PCTS: 'DANDELION_VOTING_CHANGE_QUORUM_PCTS',
-    DANDELION_VOTING_INIT_SUPPORT_TOO_BIG: 'DANDELION_VOTING_INIT_SUPPORT_TOO_BIG',
     DANDELION_VOTING_CHANGE_SUPP_TOO_BIG: 'DANDELION_VOTING_CHANGE_SUPP_TOO_BIG',
-    DANDELION_VOTING_CAN_NOT_VOTE: 'DANDELION_VOTING_CAN_NOT_VOTE',
-    DANDELION_VOTING_CAN_NOT_EXECUTE: 'DANDELION_VOTING_CAN_NOT_EXECUTE',
-    DANDELION_VOTING_CAN_NOT_FORWARD: 'DANDELION_VOTING_CAN_NOT_FORWARD',
+    DANDELION_VOTING_CANNOT_VOTE: 'DANDELION_VOTING_CANNOT_VOTE',
+    DANDELION_VOTING_CANNOT_EXECUTE: 'DANDELION_VOTING_CANNOT_EXECUTE',
+    DANDELION_VOTING_CANNOT_FORWARD: 'DANDELION_VOTING_CANNOT_FORWARD',
     DANDELION_VOTING_ORACLE_SENDER_MISSING: 'DANDELION_VOTING_ORACLE_SENDER_MISSING',
     DANDELION_VOTING_ORACLE_SENDER_TOO_BIG: 'DANDELION_VOTING_ORACLE_SENDER_TOO_BIG',
     DANDELION_VOTING_ORACLE_SENDER_ZERO: 'DANDELION_VOTING_ORACLE_SENDER_ZERO'
@@ -177,7 +178,8 @@ contract('Voting App', ([root, holder1, holder2, holder20, holder29, holder51, n
 
   })
 
-  for (const decimals of [0, 2, 18, 26]) {
+  for (const decimals of [0]) {
+  // for (const decimals of [0, 2, 18, 26]) {
     context(`normal token supply, ${decimals} decimals`, () => {
       const neededSupport = pct16(50)
       const minimumAcceptanceQuorum = pct16(20)
@@ -276,7 +278,7 @@ contract('Voting App', ([root, holder1, holder2, holder20, holder29, holder51, n
         })
 
         it('fails getting a vote with id 0', async () => {
-          await assertRevert(voting.getVote(0), errors.DANDELION_VOTING_VOTE_ID_ZERO)
+          await assertRevert(voting.getVote(0), errors.DANDELION_VOTING_NO_VOTE)
         })
 
         it('changing required support does not affect vote required support', async () => {
@@ -356,16 +358,16 @@ contract('Voting App', ([root, holder1, holder2, holder20, holder29, holder51, n
 
         it('throws when voter stake becomes 0 after vote start', async () => {
           await token.transfer(nonHolder, bigExp(29, decimals), { from: holder29 })
-          await assertRevert(voting.vote(voteId, true, { from: holder29 }), errors.DANDELION_VOTING_CAN_NOT_VOTE)
+          await assertRevert(voting.vote(voteId, true, { from: holder29 }), errors.DANDELION_VOTING_CANNOT_VOTE)
         })
 
         it('throws when non-holder votes', async () => {
-          await assertRevert(voting.vote(voteId, true, { from: nonHolder }), errors.DANDELION_VOTING_CAN_NOT_VOTE)
+          await assertRevert(voting.vote(voteId, true, { from: nonHolder }), errors.DANDELION_VOTING_CANNOT_VOTE)
         })
 
         it('throws when voting after voting closes', async () => {
           await voting.mockAdvanceBlocks(durationBlocks)
-          await assertRevert(voting.vote(voteId, true, { from: holder29 }), errors.DANDELION_VOTING_CAN_NOT_VOTE)
+          await assertRevert(voting.vote(voteId, true, { from: holder29 }), errors.DANDELION_VOTING_CANNOT_VOTE)
         })
 
         it('throws when voting before start block', async () => {
@@ -375,7 +377,7 @@ contract('Voting App', ([root, holder1, holder2, holder20, holder29, holder51, n
 
           assert(parseInt(newVoteStartBlock) > parseInt(currentBlock), 'new vote start block should be ahead of current block')
 
-          await assertRevert(voting.vote(newVoteId, true, { from: holder29 }), errors.DANDELION_VOTING_CAN_NOT_VOTE)
+          await assertRevert(voting.vote(newVoteId, true, { from: holder29 }), errors.DANDELION_VOTING_CANNOT_VOTE)
         })
 
         it('can execute if vote is approved with support and quorum and execution delay has passed', async () => {
@@ -389,14 +391,14 @@ contract('Voting App', ([root, holder1, holder2, holder20, holder29, holder51, n
         it('cannot execute vote if not enough quorum met', async () => {
           await voting.vote(voteId, true, { from: holder20 })
           await voting.mockAdvanceBlocks(durationBlocks + executionDelayBlocks)
-          await assertRevert(voting.executeVote(voteId), errors.DANDELION_VOTING_CAN_NOT_EXECUTE)
+          await assertRevert(voting.executeVote(voteId), errors.DANDELION_VOTING_CANNOT_EXECUTE)
         })
 
         it('cannot execute vote if not support met', async () => {
           await voting.vote(voteId, false, { from: holder29 })
           await voting.vote(voteId, false, { from: holder20 })
           await voting.mockAdvanceBlocks(durationBlocks + executionDelayBlocks)
-          await assertRevert(voting.executeVote(voteId), errors.DANDELION_VOTING_CAN_NOT_EXECUTE)
+          await assertRevert(voting.executeVote(voteId), errors.DANDELION_VOTING_CANNOT_EXECUTE)
         })
 
         it('cannot execute vote before execution block', async () => {
@@ -405,24 +407,24 @@ contract('Voting App', ([root, holder1, holder2, holder20, holder29, holder51, n
           await voting.vote(voteId, true, { from: holder29 })
           await voting.vote(voteId, false, { from: holder20 })
           await voting.mockAdvanceBlocks(durationBlocks + executionDelayBlocks - blocksSinceVoteCreation)
-          await assertRevert(voting.executeVote(voteId), errors.DANDELION_VOTING_CAN_NOT_EXECUTE)
+          await assertRevert(voting.executeVote(voteId), errors.DANDELION_VOTING_CANNOT_EXECUTE)
         })
 
         it('cannot execute vote twice', async () => {
           await voting.vote(voteId, true, { from: holder51 })
           await voting.mockAdvanceBlocks(durationBlocks + executionDelayBlocks)
           await voting.executeVote(voteId)
-          await assertRevert(voting.executeVote(voteId), errors.DANDELION_VOTING_CAN_NOT_EXECUTE)
+          await assertRevert(voting.executeVote(voteId), errors.DANDELION_VOTING_CANNOT_EXECUTE)
         })
 
         it('cannot execute unvoted finished vote', async () => {
           await voting.mockAdvanceBlocks(durationBlocks + executionDelayBlocks)
-          await assertRevert(voting.executeVote(voteId), errors.DANDELION_VOTING_CAN_NOT_EXECUTE)
+          await assertRevert(voting.executeVote(voteId), errors.DANDELION_VOTING_CANNOT_EXECUTE)
         })
 
         it('voter can\'t change vote', async () => {
           await voting.vote(voteId, true, { from: holder29 })
-          await assertRevert(voting.vote(voteId, false, { from: holder29 }), errors.DANDELION_VOTING_CAN_NOT_VOTE)
+          await assertRevert(voting.vote(voteId, false, { from: holder29 }), errors.DANDELION_VOTING_CANNOT_VOTE)
         })
 
         it('cannot execute unvoted vote before start block', async () => {
@@ -431,7 +433,7 @@ contract('Voting App', ([root, holder1, holder2, holder20, holder29, holder51, n
           const currentBlock = await voting.getBlockNumberPublic()
 
           assert(parseInt(newVoteStartBlock) > parseInt(currentBlock), 'new vote start block should be ahead of current block')
-          await assertRevert(voting.executeVote(newVoteId), errors.DANDELION_VOTING_CAN_NOT_EXECUTE)
+          await assertRevert(voting.executeVote(newVoteId), errors.DANDELION_VOTING_CANNOT_EXECUTE)
         })
 
         it('sets second vote start and snapshot block correctly when vote created before vote buffer elapsed', async () => {
@@ -676,6 +678,12 @@ contract('Voting App', ([root, holder1, holder2, holder20, holder29, holder51, n
       token = await MiniMeToken.new(ZERO_ADDRESS, ZERO_ADDRESS, 0, 'n', 0, 'n', true) // empty parameters minime
     })
 
+    it('fails is token is not a contract', async () => {
+      const neededSupport = pct16(50)
+      const minimumAcceptanceQuorum = pct16(20)
+      await assertRevert(voting.initialize(root, neededSupport, minimumAcceptanceQuorum, durationBlocks, bufferBlocks, executionDelayBlocks), errors.DANDELION_VOTING_TOKEN_NOT_CONTRACT)
+    })
+
     it('fails if min acceptance quorum is greater than min support', async () => {
       const neededSupport = pct16(20)
       const minimumAcceptanceQuorum = pct16(50)
@@ -686,6 +694,12 @@ contract('Voting App', ([root, holder1, holder2, holder20, holder29, holder51, n
       const minimumAcceptanceQuorum = pct16(20)
       await assertRevert(voting.initialize(token.address, pct16(101), minimumAcceptanceQuorum, durationBlocks, bufferBlocks, executionDelayBlocks), errors.DANDELION_VOTING_INIT_SUPPORT_TOO_BIG)
       await assertRevert(voting.initialize(token.address, pct16(100), minimumAcceptanceQuorum, durationBlocks, bufferBlocks, executionDelayBlocks), errors.DANDELION_VOTING_INIT_SUPPORT_TOO_BIG)
+    })
+
+    it('fails if duration blocks is zero', async () => {
+      const neededSupport = pct16(50)
+      const minimumAcceptanceQuorum = pct16(20)
+      await assertRevert(voting.initialize(token.address, neededSupport, minimumAcceptanceQuorum, 0, bufferBlocks, executionDelayBlocks), errors.DANDELION_VOTING_DURATION_BLOCKS_ZERO)
     })
   })
 
@@ -712,7 +726,7 @@ contract('Voting App', ([root, holder1, holder2, holder20, holder29, holder51, n
 
       const { open: canVote } = await voting.getVote(voteId)
       assert.isFalse(canVote)
-      await assertRevert(voting.vote(voteId, true, { from: holder1 }), errors.DANDELION_VOTING_CAN_NOT_VOTE)
+      await assertRevert(voting.vote(voteId, true, { from: holder1 }), errors.DANDELION_VOTING_CANNOT_VOTE)
     })
   })
 
@@ -847,7 +861,7 @@ contract('Voting App', ([root, holder1, holder2, holder20, holder29, holder51, n
     it('fails to forward actions before initialization', async () => {
       const action = { to: executionTarget.address, calldata: executionTarget.contract.methods.execute().encodeABI() }
       const script = encodeCallScript([action])
-      await assertRevert(voting.forward(script, { from: holder51 }), errors.DANDELION_VOTING_CAN_NOT_FORWARD)
+      await assertRevert(voting.forward(script, { from: holder51 }), errors.DANDELION_VOTING_CANNOT_FORWARD)
     })
   })
 
