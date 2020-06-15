@@ -28,7 +28,6 @@ contract DisputableDandelionVoting is IACLOracle, TokenManagerHook, DisputableAr
     uint64 public constant PCT_BASE = 10 ** 18; // 0% = 0; 1% = 10^16; 100% = 10^18
     uint8 private constant EXECUTION_PERIOD_FALLBACK_DIVISOR = 2;
 
-    // TOOD: Can not to cannot
     string private constant ERROR_NO_VOTE = "DANDELION_VOTING_NO_VOTE";
     string private constant ERROR_TOKEN_NOT_CONTRACT = "DANDELION_VOTING_TOKEN_NOT_CONTRACT";
     string private constant ERROR_INIT_PCTS = "DANDELION_VOTING_INIT_PCTS";

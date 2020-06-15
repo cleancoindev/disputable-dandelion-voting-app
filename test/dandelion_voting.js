@@ -107,7 +107,7 @@ contract('Dandelion Voting App', ([root, holder1, holder2, holder20, holder29, h
       token = await MiniMeToken.new(ZERO_ADDRESS, ZERO_ADDRESS, 0, 'n', 0, 'n', true) // empty parameters minime
 
       await voting.initialize(token.address, neededSupport, minimumAcceptanceQuorum, durationBlocks, bufferBlocks, executionDelayBlocks)
-      await agreement.register({
+      await agreement.activate({
         disputable: voting,
         collateralToken,
         actionCollateral: 0,
@@ -192,7 +192,7 @@ contract('Dandelion Voting App', ([root, holder1, holder2, holder20, holder29, h
         await token.generateTokens(holder51, bigExp(51, decimals))
 
         await voting.initialize(token.address, neededSupport, minimumAcceptanceQuorum, durationBlocks, bufferBlocks, executionDelayBlocks)
-        await agreement.register({
+        await agreement.activate({
           disputable: voting,
           collateralToken,
           actionCollateral: 0,
@@ -711,7 +711,7 @@ contract('Dandelion Voting App', ([root, holder1, holder2, holder20, holder29, h
       token = await MiniMeToken.new(ZERO_ADDRESS, ZERO_ADDRESS, 0, 'n', 0, 'n', true) // empty parameters minime
 
       await voting.initialize(token.address, neededSupport, minimumAcceptanceQuorum, durationBlocks, bufferBlocks, executionDelayBlocks)
-      await agreement.register({
+      await agreement.activate({
         disputable: voting,
         collateralToken,
         actionCollateral: 0,
@@ -740,7 +740,7 @@ contract('Dandelion Voting App', ([root, holder1, holder2, holder20, holder29, h
       await token.generateTokens(holder1, 1)
 
       await voting.initialize(token.address, neededSupport, minimumAcceptanceQuorum, durationBlocks, bufferBlocks, executionDelayBlocks)
-      await agreement.register({
+      await agreement.activate({
         disputable: voting,
         collateralToken,
         actionCollateral: 0,
@@ -776,7 +776,7 @@ contract('Dandelion Voting App', ([root, holder1, holder2, holder20, holder29, h
       await token.generateTokens(holder2, 2)
 
       await voting.initialize(token.address, neededSupport, minimumAcceptanceQuorum, durationBlocks, bufferBlocks, executionDelayBlocks)
-      await agreement.register({
+      await agreement.activate({
         disputable: voting,
         collateralToken,
         actionCollateral: 0,
@@ -820,7 +820,7 @@ contract('Dandelion Voting App', ([root, holder1, holder2, holder20, holder29, h
       await token.generateTokens(holder2, 1)
 
       await voting.initialize(token.address, neededSupport, minimumAcceptanceQuorum, durationBlocks, bufferBlocks, executionDelayBlocks)
-      await agreement.register({
+      await agreement.activate({
         disputable: voting,
         collateralToken,
         actionCollateral: 0,
