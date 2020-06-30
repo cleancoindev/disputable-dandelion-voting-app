@@ -6,8 +6,8 @@ const { decodeEventsOfType } = require('@aragon/apps-agreement/test/helpers/lib/
 const { ACTIONS_STATE, RULINGS } = require('@aragon/apps-agreement/test/helpers/utils/enums')
 
 const { pct, getVoteState } = require('./helpers/voting')
-const { encodeCallScript } = require('@aragon/contract-test-helpers/evmScript')
-const { getEventArgument, getNewProxyAddress } = require('@aragon/contract-test-helpers/events')
+const { encodeCallScript } = require('@aragon/contract-helpers-test/evmScript')
+const { getEventArgument, getNewProxyAddress } = require('@aragon/contract-helpers-test/events')
 
 const deployer = require('@aragon/apps-agreement/test/helpers/utils/deployer')(web3, artifacts)
 
@@ -97,7 +97,7 @@ contract('Dandelion Voting disputable', ([_, owner, voter51, voter49]) => {
     it('saves the agreement action data', async () => {
       const { pausedAtBlock, pauseDurationBlocks, status } = await voting.getDisputableInfo(voteId)
 
-      assertBn(actionId, 0, 'action ID does not match')
+      assertBn(actionId, 1, 'action ID does not match')
       assertBn(pausedAtBlock, 0, 'paused at does not match')
       assertBn(pauseDurationBlocks, 0, 'pause duration does not match')
       assertBn(status, VOTE_STATUS.ACTIVE, 'vote status does not match')
@@ -108,10 +108,18 @@ contract('Dandelion Voting disputable', ([_, owner, voter51, voter49]) => {
 
       assertBn(disputableActionId, voteId, 'disputable ID does not match')
       assert.equal(disputable, voting.address, 'disputable address does not match')
-      assertBn(collateralRequirementId, 0, 'collateral ID does not match')
+      assertBn(collateralRequirementId, 1, 'collateral ID does not match')
       assert.equal(toAscii(context), 'metadata', 'context does not match')
       assert.equal(submitter, voter51, 'action submitter does not match')
       assert.isFalse(closed, 'action is not closed')
+    })
+
+    it('canChallenge returns true', async () => {
+      assert.isTrue(await voting.canChallenge(voteId))
+    })
+
+    it('canClose returns false', async () => {
+      assert.isFalse(await voting.canClose(voteId))
     })
   })
 
@@ -135,9 +143,17 @@ contract('Dandelion Voting disputable', ([_, owner, voter51, voter49]) => {
       assert.isTrue(closed, 'action is not closed')
       assertBn(disputableActionId, voteId, 'disputable ID does not match')
       assert.equal(disputable, voting.address, 'disputable address does not match')
-      assertBn(collateralRequirementId, 0, 'collateral ID does not match')
+      assertBn(collateralRequirementId, 1, 'collateral ID does not match')
       assert.equal(toAscii(context), 'metadata', 'context does not match')
       assert.equal(submitter, voter51, 'action submitter does not match')
+    })
+
+    it('canChallenge returns false', async () => {
+      assert.isFalse(await voting.canChallenge(voteId))
+    })
+
+    it('canClose returns true', async () => {
+      assert.isTrue(await voting.canClose(voteId))
     })
   })
 
@@ -181,6 +197,15 @@ contract('Dandelion Voting disputable', ([_, owner, voter51, voter49]) => {
       assert.isFalse(isOpen, 'vote is open')
       assert.isFalse(isExecuted, 'vote is executed')
     })
+
+    it('canChallenge returns false', async () => {
+      assert.isFalse(await voting.canChallenge(voteId))
+    })
+
+    it('canClose returns true', async () => {
+      // Note this function will be overlooked when an action is in the challenged state
+      assert.isTrue(await voting.canClose(voteId))
+    })
   })
 
   describe('resumes', () => {
@@ -202,7 +227,7 @@ contract('Dandelion Voting disputable', ([_, owner, voter51, voter49]) => {
         assertBn(status, VOTE_STATUS.ACTIVE, 'vote status does not match')
 
         assertBn(voteActionId, actionId, 'action ID does not match')
-        assertBn(pausedAtBlock, pauseBlockNumber, 'paused at does not match')
+        assertBn(pausedAtBlock, 0, 'paused at does not match')
         assertBn(pauseDurationBlocks, expectedPauseDuration, 'pause duration does not match')
       })
 
@@ -252,6 +277,14 @@ contract('Dandelion Voting disputable', ([_, owner, voter51, voter49]) => {
         await agreement.executeRuling({ actionId, ruling: RULINGS.IN_FAVOR_OF_SUBMITTER })
       })
 
+      it('canChallenge returns true', async () => {
+        assert.isTrue(await voting.canChallenge(voteId))
+      })
+
+      it('canClose returns false', async () => {
+        assert.isFalse(await voting.canClose(voteId))
+      })
+
       itResumesTheVote()
     })
 
@@ -284,7 +317,7 @@ contract('Dandelion Voting disputable', ([_, owner, voter51, voter49]) => {
         assertBn(status, VOTE_STATUS.CANCELLED, 'vote status does not match')
 
         assertBn(voteActionId, actionId, 'action ID does not match')
-        assertBn(pausedAtBlock, pauseBlock, 'paused at does not match')
+        assertBn(pausedAtBlock, 0, 'paused at does not match')
         assertBn(pauseDurationBlocks, expectedPauseDuration, 'pause duration does not match')
       })
 

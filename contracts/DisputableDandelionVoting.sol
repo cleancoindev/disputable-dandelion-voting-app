@@ -42,8 +42,6 @@ contract DisputableDandelionVoting is IACLOracle, TokenManagerHook, DisputableAr
     string private constant ERROR_ORACLE_SENDER_MISSING = "DANDELION_VOTING_ORACLE_SENDER_MISSING";
     string private constant ERROR_ORACLE_SENDER_TOO_BIG = "DANDELION_VOTING_ORACLE_SENDER_TOO_BIG";
     string private constant ERROR_ORACLE_SENDER_ZERO = "DANDELION_VOTING_ORACLE_SENDER_ZERO";
-    string private constant ERROR_CANNOT_PAUSE_VOTE = "VOTING_CANNOT_PAUSE_VOTE";
-    string private constant ERROR_VOTE_NOT_PAUSED = "VOTING_VOTE_NOT_PAUSED";
 
     enum VoterState { Absent, Yea, Nay }
 
@@ -327,7 +325,6 @@ contract DisputableDandelionVoting is IACLOracle, TokenManagerHook, DisputableAr
 
     // Disputable getter fns
 
-    // TODO: Test this.
     /**
     * @dev Tells whether a vote can be challenged or not
     * @return True if the given vote can be challenged, false otherwise
@@ -336,24 +333,12 @@ contract DisputableDandelionVoting is IACLOracle, TokenManagerHook, DisputableAr
         return _voteExists(_voteId) && _canPause(votes[_voteId]);
     }
 
-    // TODO: Test this.
     /**
     * @dev Tells whether a vote can be closed or not
     * @return True if the given vote can be closed, false otherwise
     */
     function canClose(uint256 _voteId) external view returns (bool) {
         return _voteExists(_voteId) && !_isVoteOpen(votes[_voteId]);
-    }
-
-    // TODO: test this
-    /**
-    * @dev Tell disputable information related to a vote
-    */
-    function getDisputableAction(uint256 _voteId) external view voteExists(_voteId) returns (uint64 endBlock, bool challenged, bool finished) {
-        Vote storage vote_ = votes[_voteId];
-        endBlock = _voteEndBlock(vote_);
-        challenged = _isPaused(vote_);
-        finished = _isVoteOpen(vote_);
     }
 
     // Forwarding fns
@@ -421,13 +406,12 @@ contract DisputableDandelionVoting is IACLOracle, TokenManagerHook, DisputableAr
     // IDisputable fns
 
     /**
-    * @dev Challenge a vote
+    * @dev Challenge a vote. Note that this can only be called if DisputableDandelionVoting.canChallenge() returns true
     * @param _voteId Identification number of the vote to be challenged
     * @param _challengeId Identification number of the challenge associated to the vote in the Agreement app
     */
     function _onDisputableActionChallenged(uint256 _voteId, uint256 _challengeId, address /* _challenger */) internal {
         Vote storage vote_ = votes[_voteId];
-        require(_canPause(vote_), ERROR_CANNOT_PAUSE_VOTE);
 
         vote_.disputableStatus = DisputableStatus.Paused;
         vote_.pausedAtBlock = getBlockNumber64();
@@ -435,33 +419,38 @@ contract DisputableDandelionVoting is IACLOracle, TokenManagerHook, DisputableAr
     }
 
     /**
-    * @dev Allow a vote
+    * @dev Allow a vote. Note that either this, _onDisputableActionRejected() or _onDisputableActionVoided()
+    *      will be called once for each challenge
     * @param _voteId Identification number of the vote to be allowed
     */
     function _onDisputableActionAllowed(uint256 _voteId) internal {
         Vote storage vote_ = votes[_voteId];
-        require(_isPaused(vote_), ERROR_VOTE_NOT_PAUSED);
 
         vote_.disputableStatus = DisputableStatus.Active;
         vote_.pauseDurationBlocks = getBlockNumber64().sub(vote_.pausedAtBlock);
+        vote_.pausedAtBlock = 0;
+
         emit ResumeVote(_voteId);
     }
 
     /**
-    * @dev Reject a vote
+    * @dev Reject a vote. Note that either this, _onDisputableActionAllowed() or _onDisputableActionVoided()
+    *      will be called once for each challenge
     * @param _voteId Identification number of the vote to be rejected
     */
     function _onDisputableActionRejected(uint256 _voteId) internal {
         Vote storage vote_ = votes[_voteId];
-        require(_isPaused(vote_), ERROR_VOTE_NOT_PAUSED);
 
         vote_.disputableStatus = DisputableStatus.Cancelled;
         vote_.pauseDurationBlocks = getBlockNumber64().sub(vote_.pausedAtBlock);
+        vote_.pausedAtBlock = 0;
+
         emit CancelVote(_voteId);
     }
 
     /**
-    * @dev Void an entry
+    * @dev Void an entry. Note that either this, _onDisputableActionAllowed() or _onDisputableActionRejected()
+    *      will be called once for each challenge
     * @param _voteId Identification number of the entry to be voided
     */
     function _onDisputableActionVoided(uint256 _voteId) internal {

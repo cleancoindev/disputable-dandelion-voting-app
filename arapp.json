@@ -1,5 +1,5 @@
 {
-  "path": "contracts/DandelionVoting.sol",
+  "path": "contracts/DisputableDandelionVoting.sol",
   "appName": "dandelion-voting-disputable.aragonpm.eth",
   "environments": {
     "default": {
