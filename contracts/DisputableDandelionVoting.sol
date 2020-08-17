@@ -5,7 +5,7 @@
 pragma solidity 0.4.24;
 
 import "@aragon/os/contracts/apps/AragonApp.sol";
-import "@aragon/os/contracts/common/IForwarder.sol";
+import "@aragon/os/contracts/forwarding/IForwarderWithContext.sol";
 import "@aragon/os/contracts/acl/IACLOracle.sol";
 import "@aragon/os/contracts/lib/math/SafeMath.sol";
 import "@aragon/os/contracts/lib/math/SafeMath64.sol";
@@ -15,7 +15,7 @@ import "@1hive/apps-token-manager/contracts/TokenManagerHook.sol";
 
 // TODO: Remove msg.sender from authp when ACL is updated
 // TODO: Optimize
-contract DisputableDandelionVoting is IACLOracle, TokenManagerHook, DisputableAragonApp, IForwarder {
+contract DisputableDandelionVoting is IACLOracle, TokenManagerHook, IForwarderWithContext, DisputableAragonApp {
     using SafeMath for uint256;
     using SafeMath64 for uint64;
 
@@ -81,7 +81,7 @@ contract DisputableDandelionVoting is IACLOracle, TokenManagerHook, DisputableAr
     uint256 public votesLength;
     mapping (address => uint256) public latestYeaVoteId;
 
-    event StartVote(uint256 indexed voteId, address indexed creator, string metadata);
+    event StartVote(uint256 indexed voteId, address indexed creator, bytes context);
     event CastVote(uint256 indexed voteId, address indexed voter, bool supports, uint256 stake);
     event PauseVote(uint256 indexed voteId, uint256 indexed challengeId);
     event ResumeVote(uint256 indexed voteId);
@@ -180,18 +180,18 @@ contract DisputableDandelionVoting is IACLOracle, TokenManagerHook, DisputableAr
     }
 
     /**
-    * @notice Create a new vote about "`_metadata`"
+    * @notice Create a new vote about "`_context`"
     * @param _executionScript EVM script to be executed on approval
-    * @param _metadata Vote metadata
+    * @param _context Vote metadata
     * @param _castVote Whether to also cast newly created vote
     * @return voteId id for newly created vote
     */
-    function newVote(bytes _executionScript, string _metadata, bool _castVote)
+    function newVote(bytes _executionScript, bytes _context, bool _castVote)
         external
         authP(CREATE_VOTES_ROLE, arr(msg.sender))
         returns (uint256 voteId)
     {
-        return _newVote(_executionScript, _metadata, _castVote);
+        return _newVote(_executionScript, _context, _castVote);
     }
 
     /**
@@ -344,33 +344,26 @@ contract DisputableDandelionVoting is IACLOracle, TokenManagerHook, DisputableAr
     // Forwarding fns
 
     /**
-    * @notice Returns whether the Voting app is a forwarder or not
-    * @dev IForwarder interface conformance
-    * @return Always true
-    */
-    function isForwarder() external pure returns (bool) {
-        return true;
-    }
-
-    /**
     * @notice Creates a vote to execute the desired action, and casts a support vote if possible
-    * @dev IForwarder interface conformance
+    * @dev IForwarderWithContext interface conformance
            Disputable apps are required to be the initial step in the forwarding chain
     * @param _evmScript EVM script to be executed on approval
+    * @param _context Vote context
     */
-    function forward(bytes _evmScript) public {
-        require(canForward(msg.sender, _evmScript), ERROR_CANNOT_FORWARD);
-        // TODO: Use new forwarding interface with context information
-        _newVote(_evmScript, "", true);
+    function forward(bytes _evmScript, bytes _context) external {
+        require(this.canForward(msg.sender, _evmScript), ERROR_CANNOT_FORWARD);
+        _newVote(_evmScript, _context, true);
     }
 
     /**
-    * @notice Returns whether `_sender` can forward actions or not
-    * @dev IForwarder interface conformance
+    * @dev Returns whether `_sender` can forward actions
+    * @dev IForwarderWithContext interface conformance
     * @param _sender Address of the account intending to forward an action
-    * @return True if the given address can create votes, false otherwise
+    * @param _evmScript EVM script being forwarded
+    * @return True if the given address can create votes
     */
-    function canForward(address _sender, bytes) public view returns (bool) {
+    // TODO: Cross check with disputable voting
+    function canForward(address _sender, bytes _evmScript) external view returns (bool) {
         // TODO: Handle the case where a Disputable app doesn't have an Agreement set
         // Note that `canPerform()` implicitly does an initialization check itself
         return canPerform(_sender, CREATE_VOTES_ROLE, arr(_sender));
@@ -465,7 +458,7 @@ contract DisputableDandelionVoting is IACLOracle, TokenManagerHook, DisputableAr
     * @dev Internal function to create a new vote
     * @return voteId id for newly created vote
     */
-    function _newVote(bytes _executionScript, string _metadata, bool _castVote) internal returns (uint256 voteId) {
+    function _newVote(bytes _executionScript, bytes _context, bool _castVote) internal returns (uint256 voteId) {
         voteId = ++votesLength; // Increment votesLength before assigning to votedId. The first voteId is 1.
 
         uint64 previousVoteStartBlock = votes[voteId - 1].startBlock;
@@ -485,9 +478,9 @@ contract DisputableDandelionVoting is IACLOracle, TokenManagerHook, DisputableAr
 
         // Notify the Agreement app tied to the current voting app about the vote created.
         // This is mandatory to make the vote disputable, by storing a reference to it on the Agreement app.
-        vote_.actionId = _newAgreementAction(voteId, bytes(_metadata), msg.sender);
+        vote_.actionId = _newAgreementAction(voteId, _context, msg.sender);
 
-        emit StartVote(voteId, msg.sender, _metadata);
+        emit StartVote(voteId, msg.sender, _context);
 
         if (_castVote && _canVote(vote_, msg.sender)) {
             _vote(voteId, true, msg.sender);

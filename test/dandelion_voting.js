@@ -1,25 +1,17 @@
-const { assertRevert } = require('@aragon/contract-helpers-test/assertThrow')
-const { assertAmountOfEvents } = require('@aragon/contract-helpers-test/assertEvent')
-const { getEventArgument, getNewProxyAddress } = require('@aragon/contract-helpers-test/events')
-const getBlockNumber = require('@aragon/contract-helpers-test/blockNumber')(web3)
-const { encodeCallScript } = require('@aragon/contract-helpers-test/evmScript')
-const { makeErrorMappingProxy } = require('@aragon/contract-helpers-test/utils')
+const {
+  ZERO_ADDRESS, ONE_DAY, bigExp, pct16, bn, getEventArgument, makeErrorMappingProxy, latestBlock
+} = require('@aragon/contract-helpers-test')
+const { assertBn, assertRevert, assertEvent, assertAmountOfEvents } = require('@aragon/contract-helpers-test/src/asserts')
+const { getInstalledApp, encodeCallScript, EMPTY_CALLS_SCRIPT } = require('@aragon/contract-helpers-test/src/aragon-os')
+const deployer = require('@aragon/apps-agreement/test/helpers/utils/deployer')(web3, artifacts)
 
 const ExecutionTarget = artifacts.require('ExecutionTarget')
 const Voting = artifacts.require('DisputableDandelionVotingMock')
 const MiniMeToken = artifacts.require('MiniMeToken')
 
-const deployer = require('@aragon/apps-agreement/test/helpers/utils/deployer')(web3, artifacts)
-
-const toBn = (number) => web3.utils.toBN(number)
-const bigExp = (x, y) => toBn(x).mul(toBn(10).pow(toBn(y)))
-const pct16 = x => bigExp(x, 16)
 const createdVoteId = receipt => getEventArgument(receipt, 'StartVote', 'voteId')
 
 const ANY_ADDR = '0xffffffffffffffffffffffffffffffffffffffff'
-const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
-const EMPTY_SCRIPT = '0x00000001'
-const ONE_DAY = 60 * 60 * 24
 
 const VOTER_STATE = ['ABSENT', 'YEA', 'NAY'].reduce((state, key, index) => {
   state[key] = index
@@ -65,7 +57,7 @@ contract('Dandelion Voting App', ([root, holder1, holder2, holder20, holder29, h
     votingBase = await Voting.new()
 
     // Setup agreements
-    agreement = await deployer.deployAndInitializeWrapper({ root })
+    agreement = await deployer.deployAndInitializeAgreementWrapper({ root })
     collateralToken = await deployer.deployCollateralToken()
     await agreement.sign(root)
     await agreement.sign(holder1)
@@ -86,7 +78,7 @@ contract('Dandelion Voting App', ([root, holder1, holder2, holder20, holder29, h
 
   beforeEach(async () => {
     const receipt = await deployer.dao.newAppInstance('0x1234', votingBase.address, '0x', false, { from: root })
-    voting = await Voting.at(getNewProxyAddress(receipt))
+    voting = await Voting.at(getInstalledApp(receipt))
 
     await deployer.acl.createPermission(ANY_ADDR, voting.address, CREATE_VOTES_ROLE, root, { from: root })
     await deployer.acl.createPermission(ANY_ADDR, voting.address, MODIFY_SUPPORT_ROLE, root, { from: root })
@@ -134,14 +126,14 @@ contract('Dandelion Voting App', ([root, holder1, holder2, holder20, holder29, h
     })
 
     it('can change required support', async () => {
-      const receipt = await voting.changeSupportRequiredPct(neededSupport.add(toBn(1)))
+      const receipt = await voting.changeSupportRequiredPct(neededSupport.add(bn(1)))
       assertAmountOfEvents(receipt, 'ChangeSupportRequired')
 
-      assert.equal((await voting.supportRequiredPct()).toString(), neededSupport.add(toBn(1)).toString(), 'should have changed required support')
+      assert.equal((await voting.supportRequiredPct()).toString(), neededSupport.add(bn(1)).toString(), 'should have changed required support')
     })
 
     it('fails changing required support lower than minimum acceptance quorum', async () => {
-      await assertRevert(voting.changeSupportRequiredPct(minimumAcceptanceQuorum.sub(toBn(1))), errors.DANDELION_VOTING_CHANGE_SUPPORT_PCTS)
+      await assertRevert(voting.changeSupportRequiredPct(minimumAcceptanceQuorum.sub(bn(1))), errors.DANDELION_VOTING_CHANGE_SUPPORT_PCTS)
     })
 
     it('fails changing required support to 100% or more', async () => {
@@ -157,7 +149,7 @@ contract('Dandelion Voting App', ([root, holder1, holder2, holder20, holder29, h
     })
 
     it('fails changing minimum acceptance quorum to greater than min support', async () => {
-      await assertRevert(voting.changeMinAcceptQuorumPct(neededSupport.add(toBn(1))), errors.DANDELION_VOTING_CHANGE_QUORUM_PCTS)
+      await assertRevert(voting.changeMinAcceptQuorumPct(neededSupport.add(bn(1))), errors.DANDELION_VOTING_CHANGE_QUORUM_PCTS)
     })
 
     it('can change vote buffer blocks', async () => {
@@ -207,21 +199,21 @@ contract('Dandelion Voting App', ([root, holder1, holder2, holder20, holder29, h
       it('execution scripts can execute multiple actions', async () => {
         const action = { to: executionTarget.address, calldata: executionTarget.contract.methods.execute().encodeABI() }
         const script = encodeCallScript([action, action, action])
-        const voteId = createdVoteId(await voting.newVote(script, '', true, { from: holder51 }))
+        const voteId = createdVoteId(await voting.newVote(script, '0x', true, { from: holder51 }))
         await voting.mockAdvanceBlocks(durationBlocks + executionDelayBlocks)
         await voting.executeVote(voteId)
         assert.equal(await executionTarget.counter(), 3, 'should have executed multiple times')
       })
 
       it('execution script can be empty', async () => {
-        await voting.newVote(encodeCallScript([]), '', true, { from: holder51 })
+        await voting.newVote(encodeCallScript([]), '0x', true, { from: holder51 })
       })
 
       it('execution throws if any action on script throws', async () => {
         const action = { to: executionTarget.address, calldata: executionTarget.contract.methods.execute().encodeABI() }
         let script = encodeCallScript([action])
         script = script.slice(0, -2) // remove one byte from calldata for it to fail
-        const voteId = createdVoteId(await voting.newVote(script, '', true, { from: holder51 }))
+        const voteId = createdVoteId(await voting.newVote(script, '0x', true, { from: holder51 }))
         await voting.mockAdvanceBlocks(durationBlocks + executionDelayBlocks)
         await assertRevert(voting.executeVote(voteId))
       })
@@ -229,7 +221,7 @@ contract('Dandelion Voting App', ([root, holder1, holder2, holder20, holder29, h
       it('forwarding creates vote', async () => {
         const action = { to: executionTarget.address, calldata: executionTarget.contract.methods.execute().encodeABI() }
         const script = encodeCallScript([action])
-        const voteId = createdVoteId(await voting.forward(script, { from: holder51 }))
+        const voteId = createdVoteId(await voting.forward(script, '0x', { from: holder51 }))
         assert.equal(voteId, 1, 'voting should have been created')
       })
 
@@ -238,7 +230,8 @@ contract('Dandelion Voting App', ([root, holder1, holder2, holder20, holder29, h
       })
 
       context('creating vote', () => {
-        let script, voteId, creator, metadata, actionId
+        let script, voteId, creator, context, actionId
+        const expectedContext = '0xabcd'
 
         beforeEach(async () => {
           const action = {
@@ -247,10 +240,10 @@ contract('Dandelion Voting App', ([root, holder1, holder2, holder20, holder29, h
           }
           script = encodeCallScript([action, action])
 
-          const receipt = await voting.newVote(script, 'metadata', false, { from: holder51 })
+          const receipt = await voting.newVote(script, expectedContext, false, { from: holder51 })
           voteId = getEventArgument(receipt, 'StartVote', 'voteId')
           creator = getEventArgument(receipt, 'StartVote', 'creator')
-          metadata = getEventArgument(receipt, 'StartVote', 'metadata')
+          context = getEventArgument(receipt, 'StartVote', 'context')
           actionId = (await voting.getDisputableInfo(voteId))[0]
         })
 
@@ -259,17 +252,17 @@ contract('Dandelion Voting App', ([root, holder1, holder2, holder20, holder29, h
 
           assert.isTrue(open, 'vote should be open')
           assert.isFalse(executed, 'vote should not be executed')
-          assert.equal(startBlock.toString(), await getBlockNumber(), 'start block should be correct')
+          assert.equal(startBlock.toString(), await latestBlock(), 'start block should be correct')
           assert.equal(executionBlock.toString(), startBlock.toNumber() + executionDelayBlocks + durationBlocks, 'execution block should be correct')
           assert.equal(creator, holder51, 'creator should be correct')
-          assert.equal(snapshotBlock.toString(), await getBlockNumber() - 1, 'snapshot block should be correct')
+          assert.equal(snapshotBlock.toString(), await latestBlock() - 1, 'snapshot block should be correct')
           assert.equal(supportRequired.toString(), neededSupport.toString(), 'required support should be app required support')
           assert.equal(minAcceptQuorum.toString(), minimumAcceptanceQuorum.toString(), 'min quorum should be app min quorum')
           assert.equal(votingPower.toString(), bigExp(100, decimals), 'voting power should be 100')
           assert.equal(yea, 0, 'initial yea should be 0')
           assert.equal(nay, 0, 'initial nay should be 0')
           assert.equal(execScript, script, 'script should be correct')
-          assert.equal(metadata, 'metadata', 'should have returned correct metadata')
+          assert.equal(context, expectedContext, 'should have returned correct context')
           assert.equal(await voting.getVoterState(voteId, nonHolder), VOTER_STATE.ABSENT, 'nonHolder should not have voted')
         })
 
@@ -371,7 +364,7 @@ contract('Dandelion Voting App', ([root, holder1, holder2, holder20, holder29, h
         })
 
         it('throws when voting before start block', async () => {
-          const newVoteId = createdVoteId(await voting.newVote(script, 'metadata', false, { from: holder51 }))
+          const newVoteId = createdVoteId(await voting.newVote(script, '0x', false, { from: holder51 }))
           const { startBlock: newVoteStartBlock } = await voting.getVote(newVoteId)
           const currentBlock = await voting.getBlockNumberPublic()
 
@@ -428,7 +421,7 @@ contract('Dandelion Voting App', ([root, holder1, holder2, holder20, holder29, h
         })
 
         it('cannot execute unvoted vote before start block', async () => {
-          const newVoteId = createdVoteId(await voting.newVote(script, 'metadata', false, { from: holder51 }))
+          const newVoteId = createdVoteId(await voting.newVote(script, '0x', false, { from: holder51 }))
           const { startBlock: newVoteStartBlock } = await voting.getVote(newVoteId)
           const currentBlock = await voting.getBlockNumberPublic()
 
@@ -440,7 +433,7 @@ contract('Dandelion Voting App', ([root, holder1, holder2, holder20, holder29, h
           const { startBlock: currentVoteStartBlock } = await voting.getVote(voteId)
           const expectedVoteStartBlock = parseInt(currentVoteStartBlock) + bufferBlocks
 
-          const newVoteId = createdVoteId(await voting.newVote(script, 'metadata', false, { from: holder51 }))
+          const newVoteId = createdVoteId(await voting.newVote(script, '0x', false, { from: holder51 }))
 
           const { startBlock: newVoteStartBlock, snapshotBlock: newVoteSnapshotBlock } = await voting.getVote(newVoteId)
           assert.equal(newVoteStartBlock, expectedVoteStartBlock)
@@ -448,11 +441,11 @@ contract('Dandelion Voting App', ([root, holder1, holder2, holder20, holder29, h
         })
 
         it('sets third vote start and snapshot block correctly when all created within vote buffer', async () => {
-          const secondVoteId = createdVoteId(await voting.newVote(script, 'metadata', false, { from: holder51 }))
+          const secondVoteId = createdVoteId(await voting.newVote(script, '0x', false, { from: holder51 }))
           const { startBlock: secondVoteStartBlock } = await voting.getVote(secondVoteId)
           const expectedVoteStartBlock = parseInt(secondVoteStartBlock) + bufferBlocks
 
-          const thirdVoteId = createdVoteId(await voting.newVote(script, 'metadata', false, { from: holder51 }))
+          const thirdVoteId = createdVoteId(await voting.newVote(script, '0x', false, { from: holder51 }))
 
           const { startBlock: thirdVoteStartBlock, snapshotBlock: thirdVoteSnapshotBlock } = await voting.getVote(thirdVoteId)
           assert.equal(thirdVoteStartBlock, expectedVoteStartBlock)
@@ -460,19 +453,19 @@ contract('Dandelion Voting App', ([root, holder1, holder2, holder20, holder29, h
         })
 
         it('sets second vote start and snapshot block correctly when vote created after vote buffer elapsed', async () => {
-          const expectedVoteStartBlock = await getBlockNumber() + bufferBlocks + 1
+          const expectedVoteStartBlock = (await latestBlock()).toNumber() + bufferBlocks + 1
           await voting.mockAdvanceBlocks(bufferBlocks)
 
-          const newVoteId = createdVoteId(await voting.newVote(script, 'metadata', false, { from: holder51 }))
+          const newVoteId = createdVoteId(await voting.newVote(script, '0x', false, { from: holder51 }))
 
           const { startBlock: newVoteStartBlock, snapshotBlock: newVoteSnapshotBlock } = await voting.getVote(newVoteId)
-          assert.equal(newVoteStartBlock, expectedVoteStartBlock)
+          assert.equal(newVoteStartBlock.toString(), expectedVoteStartBlock.toString())
           assert.equal(newVoteSnapshotBlock, expectedVoteStartBlock - 1)
         })
 
         it('increments voteId by 1 for each new vote', async () => {
-          const secondVoteId = createdVoteId(await voting.newVote(script, 'metadata', false, { from: holder20 }))
-          const thirdVoteId = createdVoteId(await voting.newVote(script, 'metadata', false, { from: holder20 }))
+          const secondVoteId = createdVoteId(await voting.newVote(script, '0x', false, { from: holder20 }))
+          const thirdVoteId = createdVoteId(await voting.newVote(script, '0x', false, { from: holder20 }))
 
           assert.equal(voteId, 1)
           assert.equal(secondVoteId, 2)
@@ -499,7 +492,7 @@ contract('Dandelion Voting App', ([root, holder1, holder2, holder20, holder29, h
 
           beforeEach(async () => {
             await voting.mockAdvanceBlocks(bufferBlocks)
-            secondVoteId = createdVoteId(await voting.newVote(script, 'metadata', false))
+            secondVoteId = createdVoteId(await voting.newVote(script, '0x', false))
           })
 
           it('updates when voting on a second vote', async () => {
@@ -617,7 +610,7 @@ contract('Dandelion Voting App', ([root, holder1, holder2, holder20, holder29, h
             assert.isTrue(await functionCallingNoRecentPositiveVotes(holder29))
 
             voting.mockAdvanceBlocks(bufferBlocks)
-            const secondVoteId = createdVoteId(await voting.newVote(script, 'metadata', false))
+            const secondVoteId = createdVoteId(await voting.newVote(script, '0x', false))
             await voting.vote(secondVoteId, true, { from: holder29 })
 
             assert.isFalse(await functionCallingNoRecentPositiveVotes(holder29))
@@ -628,7 +621,7 @@ contract('Dandelion Voting App', ([root, holder1, holder2, holder20, holder29, h
             assert.isFalse(await functionCallingNoRecentPositiveVotes(holder29))
 
             voting.mockAdvanceBlocks(bufferBlocks)
-            createdVoteId(await voting.newVote(script, 'metadata', false))
+            createdVoteId(await voting.newVote(script, '0x', false))
 
             assert.isFalse(await functionCallingNoRecentPositiveVotes(holder29))
           })
@@ -638,7 +631,7 @@ contract('Dandelion Voting App', ([root, holder1, holder2, holder20, holder29, h
             assert.isFalse(await functionCallingNoRecentPositiveVotes(holder29))
 
             voting.mockAdvanceBlocks(bufferBlocks)
-            const secondVoteId = createdVoteId(await voting.newVote(script, 'metadata', false))
+            const secondVoteId = createdVoteId(await voting.newVote(script, '0x', false))
             await voting.vote(secondVoteId, false, { from: holder29 })
 
             assert.isFalse(await functionCallingNoRecentPositiveVotes(holder29))
@@ -652,7 +645,7 @@ contract('Dandelion Voting App', ([root, holder1, holder2, holder20, holder29, h
           })
 
           it('reverts when passed uint is out of range', async () => {
-            const outOfRangeAddressAsInt = toBn(2).pow(toBn(160))
+            const outOfRangeAddressAsInt = bn(2).pow(bn(160))
             await assertRevert(voting.canPerform(ANY_ADDR, ANY_ADDR, '0x', [outOfRangeAddressAsInt]), errors.DANDELION_VOTING_ORACLE_SENDER_TOO_BIG)
           })
 
@@ -722,7 +715,7 @@ contract('Dandelion Voting App', ([root, holder1, holder2, holder20, holder29, h
     })
 
     it('prevents voting if token has no holder', async () => {
-      const voteId = createdVoteId(await voting.newVote(EMPTY_SCRIPT, 'metadata', true))
+      const voteId = createdVoteId(await voting.newVote(EMPTY_CALLS_SCRIPT, '0x', true))
 
       const { open: canVote } = await voting.getVote(voteId)
       assert.isFalse(canVote)
@@ -752,7 +745,7 @@ contract('Dandelion Voting App', ([root, holder1, holder2, holder20, holder29, h
 
     it('new vote cannot be executed after only possible voter has voted', async () => {
       // Account creating vote does not have any tokens and therefore doesn't vote
-      const voteId = createdVoteId(await voting.newVote(EMPTY_SCRIPT, 'metadata', true))
+      const voteId = createdVoteId(await voting.newVote(EMPTY_CALLS_SCRIPT, '0x', true))
 
       assert.isFalse(await voting.canExecute(voteId), 'vote cannot be executed')
 
@@ -787,7 +780,7 @@ contract('Dandelion Voting App', ([root, holder1, holder2, holder20, holder29, h
     })
 
     it('new vote cannot be executed before holder2 voting', async () => {
-      const voteId = createdVoteId(await voting.newVote(EMPTY_SCRIPT, 'metadata', true))
+      const voteId = createdVoteId(await voting.newVote(EMPTY_CALLS_SCRIPT, '0x', true))
 
       assert.isFalse(await voting.canExecute(voteId), 'vote cannot be executed')
 
@@ -801,7 +794,7 @@ contract('Dandelion Voting App', ([root, holder1, holder2, holder20, holder29, h
     })
 
     it('creating vote as holder2 does not execute vote', async () => {
-      const voteId = createdVoteId(await voting.newVote(EMPTY_SCRIPT, 'metadata', true, { from: holder2 }))
+      const voteId = createdVoteId(await voting.newVote(EMPTY_CALLS_SCRIPT, '0x', true, { from: holder2 }))
       const { open, executed } = await voting.getVote(voteId)
 
       assert.isTrue(open, 'vote should be open')
@@ -832,36 +825,36 @@ contract('Dandelion Voting App', ([root, holder1, holder2, holder20, holder29, h
 
     it('uses the correct snapshot value if tokens are minted afterwards', async () => {
       // Create vote and afterwards generate some tokens
-      const voteId = createdVoteId(await voting.newVote(EMPTY_SCRIPT, 'metadata', true))
+      const voteId = createdVoteId(await voting.newVote(EMPTY_CALLS_SCRIPT, '0x', true))
       await token.generateTokens(holder2, 1)
 
       const { snapshotBlock } = await voting.getVote(voteId)
 
       // Generating tokens advanced the block by one
-      assert.equal(snapshotBlock.toString(), await getBlockNumber() - 2, 'snapshot block should be correct')
+      assert.equal(snapshotBlock.toString(), await latestBlock() - 2, 'snapshot block should be correct')
     })
 
     it('uses the correct snapshot value if tokens are minted in the same block', async () => {
       // Create vote and generate some tokens in the same transaction
       // Requires the voting mock to be the token's owner
       await token.changeController(voting.address)
-      const voteId = createdVoteId(await voting.newTokenAndVote(holder2, 1, 'metadata'))
+      const voteId = createdVoteId(await voting.newTokenAndVote(holder2, 1, '0x'))
 
       const { snapshotBlock } = await voting.getVote(voteId)
 
-      assert.equal(snapshotBlock.toString(), await getBlockNumber() - 1, 'snapshot block should be correct')
+      assert.equal(snapshotBlock.toString(), await latestBlock() - 1, 'snapshot block should be correct')
     })
   })
 
   context('before init', () => {
     it('fails creating a vote before initialization', async () => {
-      await assertRevert(voting.newVote(encodeCallScript([]), '', true), errors.APP_AUTH_FAILED)
+      await assertRevert(voting.newVote(encodeCallScript([]), '0x', true), errors.APP_AUTH_FAILED)
     })
 
     it('fails to forward actions before initialization', async () => {
       const action = { to: executionTarget.address, calldata: executionTarget.contract.methods.execute().encodeABI() }
       const script = encodeCallScript([action])
-      await assertRevert(voting.forward(script, { from: holder51 }), errors.DANDELION_VOTING_CANNOT_FORWARD)
+      await assertRevert(voting.forward(script, '0x', { from: holder51 }), errors.DANDELION_VOTING_CANNOT_FORWARD)
     })
   })
 
@@ -881,7 +874,7 @@ contract('Dandelion Voting App', ([root, holder1, holder2, holder20, holder29, h
     })
 
     it('tests pct ~= 100', async () => {
-      const result1 = await voting.isValuePct(10, 10, pct16(100).sub(toBn(1)))
+      const result1 = await voting.isValuePct(10, 10, pct16(100).sub(bn(1)))
       assert.equal(result1, true, 'value 10 over 10 should pass')
     })
 
@@ -889,10 +882,10 @@ contract('Dandelion Voting App', ([root, holder1, holder2, holder20, holder29, h
       const result1 = await voting.isValuePct(10, 20, pct16(50))
       assert.equal(result1, false, 'value 10 over 20 should not pass for 50%')
 
-      const result2 = await voting.isValuePct(pct16(50).sub(toBn(1)), pct16(100), pct16(50))
+      const result2 = await voting.isValuePct(pct16(50).sub(bn(1)), pct16(100), pct16(50))
       assert.equal(result2, false, 'off-by-one down should not pass')
 
-      const result3 = await voting.isValuePct(pct16(50).add(toBn(1)), pct16(100), pct16(50))
+      const result3 = await voting.isValuePct(pct16(50).add(bn(1)), pct16(100), pct16(50))
       assert.equal(result3, true, 'off-by-one up should pass')
     })
   })

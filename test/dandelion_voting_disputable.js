@@ -1,21 +1,14 @@
-const { toAscii } = require('web3-utils')
-const { bigExp, bn } = require('@aragon/apps-agreement/test/helpers/lib/numbers')
-const { assertBn } = require('@aragon/apps-agreement/test/helpers/assert/assertBn')
-const { assertRevert } = require('@aragon/apps-agreement/test/helpers/assert/assertThrow')
-const { decodeEventsOfType } = require('@aragon/apps-agreement/test/helpers/lib/decodeEvent')
-const { ACTIONS_STATE, RULINGS } = require('@aragon/apps-agreement/test/helpers/utils/enums')
-
-const { pct, getVoteState } = require('./helpers/voting')
-const { encodeCallScript } = require('@aragon/contract-helpers-test/evmScript')
-const { getEventArgument, getNewProxyAddress } = require('@aragon/contract-helpers-test/events')
-
+const { RULINGS } = require('@aragon/apps-agreement/test/helpers/utils/enums')
+const { ONE_DAY, pct16, bigExp, bn, getEventArgument, decodeEvents } = require('@aragon/contract-helpers-test')
+const { assertBn, assertRevert } = require('@aragon/contract-helpers-test/src/asserts')
+const { getInstalledApp, encodeCallScript } = require('@aragon/contract-helpers-test/src/aragon-os')
+const { getVoteState } = require('./helpers/voting')
 const deployer = require('@aragon/apps-agreement/test/helpers/utils/deployer')(web3, artifacts)
 
 const Voting = artifacts.require('DisputableDandelionVotingMock')
 const ExecutionTarget = artifacts.require('ExecutionTarget')
 
-const ONE_DAY = 60 * 60 * 24
-const ONE_DAY_BLOCKS = 60 * 60 * 24 / 15
+const ONE_DAY_BLOCKS = ONE_DAY / 15
 const ANY_ADDR = '0xffffffffffffffffffffffffffffffffffffffff'
 
 const VOTE_STATUS = {
@@ -29,15 +22,16 @@ contract('Dandelion Voting disputable', ([_, owner, voter51, voter49]) => {
   let votingBase, agreement, voting, token, collateralToken, executionTarget, script
   let voteId, actionId
 
-  const MIN_QUORUM = pct(20)
-  const MIN_SUPPORT = pct(50)
+  const CONTEXT = '0xabcd'
+  const MIN_QUORUM = pct16(20)
+  const MIN_SUPPORT = pct16(50)
   const VOTING_DURATION_BLOCKS = ONE_DAY_BLOCKS * 5
   const BUFFER_BLOCKS = 100
   const EXECUTION_DELAY_BLOCKS = 200
 
   before('deploy agreement and base voting', async () => {
     votingBase = await Voting.new()
-    agreement = await deployer.deployAndInitializeWrapper({ owner })
+    agreement = await deployer.deployAndInitializeAgreementWrapper({ owner })
     collateralToken = await deployer.deployCollateralToken()
     await agreement.sign(voter51)
   })
@@ -50,7 +44,7 @@ contract('Dandelion Voting disputable', ([_, owner, voter51, voter49]) => {
 
   beforeEach('create voting app', async () => {
     const receipt = await deployer.dao.newAppInstance('0x1234', votingBase.address, '0x', false, { from: owner })
-    voting = await Voting.at(getNewProxyAddress(receipt))
+    voting = await Voting.at(getInstalledApp(receipt))
 
     const SET_AGREEMENT_ROLE = await voting.SET_AGREEMENT_ROLE()
     await deployer.acl.createPermission(agreement.address, voting.address, SET_AGREEMENT_ROLE, owner, { from: owner })
@@ -80,8 +74,8 @@ contract('Dandelion Voting disputable', ([_, owner, voter51, voter49]) => {
       calldata: executionTarget.contract.methods.execute().encodeABI()
     }])
 
-    const receipt = await voting.newVote(script, 'metadata', cast, { from: voter })
-    const logs = decodeEventsOfType(receipt, Voting.abi, 'StartVote')
+    const receipt = await voting.newVote(script, CONTEXT, cast, { from: voter })
+    const logs = decodeEvents(receipt, Voting.abi, 'StartVote')
     voteId = getEventArgument({ logs }, 'StartVote', 'voteId')
     actionId = (await voting.getDisputableInfo(voteId))[0]
 
@@ -109,7 +103,7 @@ contract('Dandelion Voting disputable', ([_, owner, voter51, voter49]) => {
       assertBn(disputableActionId, voteId, 'disputable ID does not match')
       assert.equal(disputable, voting.address, 'disputable address does not match')
       assertBn(collateralRequirementId, 1, 'collateral ID does not match')
-      assert.equal(toAscii(context), 'metadata', 'context does not match')
+      assert.equal(context, CONTEXT, 'context does not match')
       assert.equal(submitter, voter51, 'action submitter does not match')
       assert.isFalse(closed, 'action is not closed')
     })
@@ -144,7 +138,7 @@ contract('Dandelion Voting disputable', ([_, owner, voter51, voter49]) => {
       assertBn(disputableActionId, voteId, 'disputable ID does not match')
       assert.equal(disputable, voting.address, 'disputable address does not match')
       assertBn(collateralRequirementId, 1, 'collateral ID does not match')
-      assert.equal(toAscii(context), 'metadata', 'context does not match')
+      assert.equal(context, CONTEXT, 'context does not match')
       assert.equal(submitter, voter51, 'action submitter does not match')
     })
 

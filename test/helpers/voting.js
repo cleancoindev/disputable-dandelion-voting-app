@@ -1,4 +1,4 @@
-const { bigExp } = require('@aragon/apps-agreement/test/helpers/lib/numbers')
+const { bigExp } = require('@aragon/contract-helpers-test')
 
 const pct = x => bigExp(x, 16)
 

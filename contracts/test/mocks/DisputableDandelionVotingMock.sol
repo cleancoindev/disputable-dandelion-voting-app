@@ -1,16 +1,16 @@
 pragma solidity 0.4.24;
 
 import "../../DisputableDandelionVoting.sol";
-import "@aragon/contract-helpers-test/contracts/TimeHelpersMock.sol";
+import "@aragon/contract-helpers-test/contracts/0.4/aragonOS/TimeHelpersMock.sol";
 
 
 contract DisputableDandelionVotingMock is DisputableDandelionVoting, TimeHelpersMock {
     // Mint a token and create a vote in the same transaction to test snapshot block values are correct
-    function newTokenAndVote(address _holder, uint256 _tokenAmount, string _metadata) external returns (uint256) {
+    function newTokenAndVote(address _holder, uint256 _tokenAmount, bytes _context) external returns (uint256) {
         token.generateTokens(_holder, _tokenAmount);
 
         bytes memory noScript = new bytes(0);
-        return _newVote(noScript, _metadata, false);
+        return _newVote(noScript, _context, false);
     }
 
     // _isValuePct public wrapper
