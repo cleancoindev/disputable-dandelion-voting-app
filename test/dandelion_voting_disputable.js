@@ -15,7 +15,7 @@ const VOTE_STATUS = {
   ACTIVE: 0,
   PAUSED: 1,
   CANCELLED: 2,
-  CLOSED: 3
+  EXECUTED: 3
 }
 
 contract('Dandelion Voting disputable', ([_, owner, voter51, voter49]) => {
@@ -55,7 +55,6 @@ contract('Dandelion Voting disputable', ([_, owner, voter51, voter49]) => {
     const CHALLENGE_ROLE = await deployer.base.CHALLENGE_ROLE()
     await deployer.acl.createPermission(ANY_ADDR, voting.address, CHALLENGE_ROLE, owner, { from: owner })
 
-    await voting.mockSetTimestamp(await agreement.currentTimestamp())
     await voting.initialize(token.address, MIN_SUPPORT, MIN_QUORUM, VOTING_DURATION_BLOCKS, BUFFER_BLOCKS, EXECUTION_DELAY_BLOCKS, { from: owner })
     await agreement.activate({
       disputable: voting,
@@ -122,7 +121,7 @@ contract('Dandelion Voting disputable', ([_, owner, voter51, voter49]) => {
 
     it('changes the disputable state to closed', async () => {
       const { actionId: voteActionId, pausedAtBlock, pauseDurationBlocks, status } = await voting.getDisputableInfo(voteId)
-      assertBn(status, VOTE_STATUS.CLOSED, 'vote status does not match')
+      assertBn(status, VOTE_STATUS.EXECUTED, 'vote status does not match')
 
       assertBn(voteActionId, actionId, 'action ID does not match')
       assertBn(pausedAtBlock, 0, 'paused at does not match')
@@ -155,7 +154,7 @@ contract('Dandelion Voting disputable', ([_, owner, voter51, voter49]) => {
     let challengeBlockNumber
 
     beforeEach(async () => {
-      await createVote({ voter: voter51, cast: false })
+      await createVote({ voter: voter51, cast: true })
       await agreement.challenge({ actionId })
       challengeBlockNumber = await voting.getBlockNumberPublic()
     })
@@ -179,7 +178,8 @@ contract('Dandelion Voting disputable', ([_, owner, voter51, voter49]) => {
       assert.isFalse(await voting.canExecute(voteId), 'voting can be executed')
       await assertRevert(voting.executeVote(voteId), 'DANDELION_VOTING_CANNOT_EXECUTE')
 
-      await voting.mockIncreaseTime(VOTING_DURATION_BLOCKS)
+      // Vote should have passed as creator voted in favour and execution block passed
+      await voting.mockAdvanceBlocks(VOTING_DURATION_BLOCKS + EXECUTION_DELAY_BLOCKS)
 
       assert.isFalse(await voting.canExecute(voteId), 'voting can be executed')
       await assertRevert(voting.executeVote(voteId), 'DANDELION_VOTING_CANNOT_EXECUTE')
@@ -196,9 +196,10 @@ contract('Dandelion Voting disputable', ([_, owner, voter51, voter49]) => {
       assert.isFalse(await voting.canChallenge(voteId))
     })
 
-    it('canClose returns true', async () => {
+    it('canClose returns false', async () => {
       // Note this function will be overlooked when an action is in the challenged state
-      assert.isTrue(await voting.canClose(voteId))
+      // but we ensure if returns false anyway
+      assert.isFalse(await voting.canClose(voteId))
     })
   })
 
@@ -221,7 +222,7 @@ contract('Dandelion Voting disputable', ([_, owner, voter51, voter49]) => {
         assertBn(status, VOTE_STATUS.ACTIVE, 'vote status does not match')
 
         assertBn(voteActionId, actionId, 'action ID does not match')
-        assertBn(pausedAtBlock, 0, 'paused at does not match')
+        assertBn(pausedAtBlock, pauseBlockNumber, 'paused at does not match')
         assertBn(pauseDurationBlocks, expectedPauseDuration, 'pause duration does not match')
       })
 
@@ -271,8 +272,8 @@ contract('Dandelion Voting disputable', ([_, owner, voter51, voter49]) => {
         await agreement.executeRuling({ actionId, ruling: RULINGS.IN_FAVOR_OF_SUBMITTER })
       })
 
-      it('canChallenge returns true', async () => {
-        assert.isTrue(await voting.canChallenge(voteId))
+      it('canChallenge returns false', async () => {
+        assert.isFalse(await voting.canChallenge(voteId))
       })
 
       it('canClose returns false', async () => {
@@ -296,7 +297,7 @@ contract('Dandelion Voting disputable', ([_, owner, voter51, voter49]) => {
     let pauseBlock, currentBlock
 
     beforeEach('create vote and challenge', async () => {
-      await createVote({ voter: voter51, cast: false })
+      await createVote({ voter: voter51, cast: true })
       await agreement.challenge({ actionId })
       pauseBlock = await voting.getBlockNumberPublic()
 
@@ -311,19 +312,19 @@ contract('Dandelion Voting disputable', ([_, owner, voter51, voter49]) => {
         assertBn(status, VOTE_STATUS.CANCELLED, 'vote status does not match')
 
         assertBn(voteActionId, actionId, 'action ID does not match')
-        assertBn(pausedAtBlock, 0, 'paused at does not match')
+        assertBn(pausedAtBlock, pauseBlock, 'paused at does not match')
         assertBn(pauseDurationBlocks, expectedPauseDuration, 'pause duration does not match')
       })
 
       it('does not allow a voter to vote', async () => {
         assert.isFalse(await voting.canVote(voteId, voter49), 'voter can vote')
-
         await assertRevert(voting.vote(voteId, false, { from: voter49 }), 'DANDELION_VOTING_CANNOT_VOTE')
       })
 
       it('does not allow to execute the vote', async () => {
-        assert.isFalse(await voting.canExecute(voteId), 'voting can be executed')
+        await voting.mockAdvanceBlocks(VOTING_DURATION_BLOCKS + EXECUTION_DELAY_BLOCKS)
 
+        assert.isFalse(await voting.canExecute(voteId), 'voting can be executed')
         await assertRevert(voting.executeVote(voteId), 'DANDELION_VOTING_CANNOT_EXECUTE')
       })
 

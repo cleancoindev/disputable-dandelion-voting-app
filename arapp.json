@@ -1,6 +1,6 @@
 {
   "path": "contracts/DisputableDandelionVoting.sol",
-  "appName": "dandelion-voting-disputable.aragonpm.eth",
+  "appName": "disputable-dandelion-voting.aragonpm.eth",
   "environments": {
     "default": {
       "network": "rpc",

@@ -45,11 +45,11 @@ contract DisputableDandelionVoting is IACLOracle, TokenManagerHook, IForwarderWi
 
     enum VoterState { Absent, Yea, Nay }
 
-    enum DisputableStatus {
+    enum VoteStatus {
         Active,                         // A vote that has been reported to the Agreement
         Paused,                         // A vote that is being challenged
         Cancelled,                      // A vote that has been cancelled since it was refused after a dispute
-        Closed                          // A vote that has been executed
+        Executed                        // A vote that has been executed
     }
 
     struct Vote {
@@ -65,7 +65,7 @@ contract DisputableDandelionVoting is IACLOracle, TokenManagerHook, IForwarderWi
         mapping (address => VoterState) voters;
         uint64 pausedAtBlock;                   // Block when the vote was paused
         uint64 pauseDurationBlocks;             // Duration in blocks while the vote has been paused
-        DisputableStatus disputableStatus;      // Status of the disputable vote
+        VoteStatus voteStatus;      // Status of the disputable vote
         uint256 actionId;                       // Identification number of the disputable action in the context of the agreement
     }
 
@@ -114,8 +114,7 @@ contract DisputableDandelionVoting is IACLOracle, TokenManagerHook, IForwarderWi
         uint64 _bufferBlocks,
         uint64 _executionDelayBlocks
     )
-        external
-        onlyInit
+        external onlyInit
     {
         initialized();
 
@@ -137,8 +136,7 @@ contract DisputableDandelionVoting is IACLOracle, TokenManagerHook, IForwarderWi
     * @param _supportRequiredPct New required support
     */
     function changeSupportRequiredPct(uint64 _supportRequiredPct)
-        external
-        authP(MODIFY_SUPPORT_ROLE, arr(uint256(_supportRequiredPct), uint256(supportRequiredPct)))
+        external authP(MODIFY_SUPPORT_ROLE, arr(uint256(_supportRequiredPct), uint256(supportRequiredPct)))
     {
         require(minAcceptQuorumPct <= _supportRequiredPct, ERROR_CHANGE_SUPPORT_PCTS);
         require(_supportRequiredPct < PCT_BASE, ERROR_CHANGE_SUPPORT_TOO_BIG);
@@ -152,8 +150,7 @@ contract DisputableDandelionVoting is IACLOracle, TokenManagerHook, IForwarderWi
     * @param _minAcceptQuorumPct New acceptance quorum
     */
     function changeMinAcceptQuorumPct(uint64 _minAcceptQuorumPct)
-        external
-        authP(MODIFY_QUORUM_ROLE, arr(uint256(_minAcceptQuorumPct), uint256(minAcceptQuorumPct)))
+        external authP(MODIFY_QUORUM_ROLE, arr(uint256(_minAcceptQuorumPct), uint256(minAcceptQuorumPct)))
     {
         require(_minAcceptQuorumPct <= supportRequiredPct, ERROR_CHANGE_QUORUM_PCTS);
         minAcceptQuorumPct = _minAcceptQuorumPct;
@@ -187,9 +184,7 @@ contract DisputableDandelionVoting is IACLOracle, TokenManagerHook, IForwarderWi
     * @return voteId id for newly created vote
     */
     function newVote(bytes _executionScript, bytes _context, bool _castVote)
-        external
-        authP(CREATE_VOTES_ROLE, arr(msg.sender))
-        returns (uint256 voteId)
+        external authP(CREATE_VOTES_ROLE, arr(msg.sender)) returns (uint256 voteId)
     {
         return _newVote(_executionScript, _context, _castVote);
     }
@@ -217,7 +212,7 @@ contract DisputableDandelionVoting is IACLOracle, TokenManagerHook, IForwarderWi
         require(_canExecute(vote_), ERROR_CANNOT_EXECUTE);
 
         vote_.executed = true;
-        vote_.disputableStatus = DisputableStatus.Closed;
+        vote_.voteStatus = VoteStatus.Executed;
         _closeAgreementAction(vote_.actionId);
 
         bytes memory input = new bytes(0); // TODO: Consider input for voting scripts
@@ -263,10 +258,7 @@ contract DisputableDandelionVoting is IACLOracle, TokenManagerHook, IForwarderWi
     * @return Vote power
     * @return Vote script
     */
-    function getVote(uint256 _voteId)
-        external
-        view
-        voteExists(_voteId)
+    function getVote(uint256 _voteId) external view voteExists(_voteId)
         returns (
             bool open,
             bool executed,
@@ -296,22 +288,19 @@ contract DisputableDandelionVoting is IACLOracle, TokenManagerHook, IForwarderWi
         script = vote_.executionScript;
     }
 
-    function getDisputableInfo(uint256 _voteId)
-        external
-        view
-        voteExists(_voteId)
+    function getDisputableInfo(uint256 _voteId) external view voteExists(_voteId)
         returns (
             uint256 actionId,
             uint64 pausedAtBlock,
             uint64 pauseDurationBlocks,
-            DisputableStatus status
+            VoteStatus status
         )
     {
         Vote storage vote_ = votes[_voteId];
         actionId = vote_.actionId;
         pausedAtBlock = vote_.pausedAtBlock;
         pauseDurationBlocks = vote_.pauseDurationBlocks;
-        status = vote_.disputableStatus;
+        status = vote_.voteStatus;
     }
 
     /**
@@ -338,7 +327,10 @@ contract DisputableDandelionVoting is IACLOracle, TokenManagerHook, IForwarderWi
     * @return True if the given vote can be closed, false otherwise
     */
     function canClose(uint256 _voteId) external view returns (bool) {
-        return _voteExists(_voteId) && !_isVoteOpen(votes[_voteId]);
+        Vote storage vote_ = votes[_voteId];
+        VoteStatus voteStatus = vote_.voteStatus;
+        return _voteExists(_voteId) && !_isVoteOpen(vote_)
+            && (voteStatus == VoteStatus.Active || voteStatus == VoteStatus.Executed);
     }
 
     // Forwarding fns
@@ -406,8 +398,9 @@ contract DisputableDandelionVoting is IACLOracle, TokenManagerHook, IForwarderWi
     function _onDisputableActionChallenged(uint256 _voteId, uint256 _challengeId, address /* _challenger */) internal {
         Vote storage vote_ = votes[_voteId];
 
-        vote_.disputableStatus = DisputableStatus.Paused;
+        vote_.voteStatus = VoteStatus.Paused;
         vote_.pausedAtBlock = getBlockNumber64();
+
         emit PauseVote(_voteId, _challengeId);
     }
 
@@ -419,9 +412,8 @@ contract DisputableDandelionVoting is IACLOracle, TokenManagerHook, IForwarderWi
     function _onDisputableActionAllowed(uint256 _voteId) internal {
         Vote storage vote_ = votes[_voteId];
 
-        vote_.disputableStatus = DisputableStatus.Active;
+        vote_.voteStatus = VoteStatus.Active;
         vote_.pauseDurationBlocks = getBlockNumber64().sub(vote_.pausedAtBlock);
-        vote_.pausedAtBlock = 0;
 
         emit ResumeVote(_voteId);
     }
@@ -434,9 +426,8 @@ contract DisputableDandelionVoting is IACLOracle, TokenManagerHook, IForwarderWi
     function _onDisputableActionRejected(uint256 _voteId) internal {
         Vote storage vote_ = votes[_voteId];
 
-        vote_.disputableStatus = DisputableStatus.Cancelled;
+        vote_.voteStatus = VoteStatus.Cancelled;
         vote_.pauseDurationBlocks = getBlockNumber64().sub(vote_.pausedAtBlock);
-        vote_.pausedAtBlock = 0;
 
         emit CancelVote(_voteId);
     }
@@ -474,7 +465,7 @@ contract DisputableDandelionVoting is IACLOracle, TokenManagerHook, IForwarderWi
         vote_.supportRequiredPct = supportRequiredPct;
         vote_.minAcceptQuorumPct = minAcceptQuorumPct;
         vote_.executionScript = _executionScript;
-        vote_.disputableStatus = DisputableStatus.Active;
+        vote_.voteStatus = VoteStatus.Active;
 
         // Notify the Agreement app tied to the current voting app about the vote created.
         // This is mandatory to make the vote disputable, by storing a reference to it on the Agreement app.
@@ -522,8 +513,11 @@ contract DisputableDandelionVoting is IACLOracle, TokenManagerHook, IForwarderWi
             return false;
         }
 
-        // This will always be later than the end of the previous vote
         if (getBlockNumber64() < _voteExecutionBlock(vote_)) {
+            return false;
+        }
+
+        if (vote_.voteStatus != VoteStatus.Active) {
             return false;
         }
 
@@ -540,7 +534,7 @@ contract DisputableDandelionVoting is IACLOracle, TokenManagerHook, IForwarderWi
 
         bool hasSupportRequired = _isValuePct(vote_.yea, totalVotes, vote_.supportRequiredPct);
         bool hasMinQuorum = _isValuePct(vote_.yea, votingPowerAtSnapshot, vote_.minAcceptQuorumPct);
-        bool notCancelled = !_isCancelled(vote_);
+        bool notCancelled = vote_.voteStatus != VoteStatus.Cancelled;
 
         return hasSupportRequired && hasMinQuorum && notCancelled;
     }
@@ -562,25 +556,7 @@ contract DisputableDandelionVoting is IACLOracle, TokenManagerHook, IForwarderWi
     * @return True if the given vote can be paused, false otherwise
     */
     function _canPause(Vote storage vote_) internal view returns (bool) {
-        return vote_.disputableStatus == DisputableStatus.Active && vote_.pausedAtBlock == 0;
-    }
-
-    /**
-    * @dev Tell whether a vote is paused or not
-    * @param vote_ Vote action instance being queried
-    * @return True if the given vote is paused, false otherwise
-    */
-    function _isPaused(Vote storage vote_) internal view returns (bool) {
-        return vote_.disputableStatus == DisputableStatus.Paused;
-    }
-
-    /**
-    * @dev Tell whether a vote is cancelled or not
-    * @param vote_ Vote action instance being queried
-    * @return True if the given vote is cancelled, false otherwise
-    */
-    function _isCancelled(Vote storage vote_) internal view returns (bool) {
-        return vote_.disputableStatus == DisputableStatus.Cancelled;
+        return vote_.voteStatus == VoteStatus.Active && vote_.pausedAtBlock == 0;
     }
 
     /**
@@ -601,8 +577,7 @@ contract DisputableDandelionVoting is IACLOracle, TokenManagerHook, IForwarderWi
     function _isVoteOpen(Vote storage vote_) internal view returns (bool) {
         uint256 votingPowerAtSnapshot = token.totalSupplyAt(vote_.snapshotBlock);
         return votingPowerAtSnapshot > 0
-            && !_isPaused(vote_)
-            && !_isCancelled(vote_)
+            && vote_.voteStatus == VoteStatus.Active
             && getBlockNumber64() >= vote_.startBlock
             && getBlockNumber64() < _voteEndBlock(vote_);
     }
@@ -645,7 +620,7 @@ contract DisputableDandelionVoting is IACLOracle, TokenManagerHook, IForwarderWi
     }
 
     /**
-    * @notice Returns whether the sender has voted on the most recent open vote or closed unexecuted/uncancelled vote.
+    * @notice Returns whether the sender has voted in favour of the most recent open vote or closed unexecuted/uncancelled vote.
     * @param _sender Voter to check if they can vote
     * return False if the sender has voted on the most recent open vote or closed unexecuted/uncancelled vote, true if they haven't.
     */
@@ -659,7 +634,7 @@ contract DisputableDandelionVoting is IACLOracle, TokenManagerHook, IForwarderWi
         uint256 voteExecutionBlock = _voteExecutionBlock(senderLatestYeaVote_);
 
         bool senderLatestYeaVoteFailed = !_votePassed(senderLatestYeaVote_);
-        bool senderLatestYeaVoteNotPaused = !_isPaused(senderLatestYeaVote_);
+        bool senderLatestYeaVoteNotPaused = senderLatestYeaVote_.voteStatus != VoteStatus.Paused;
         bool senderLatestYeaVoteExecutionBlockPassed = getBlockNumber64() >= voteExecutionBlock;
 
         uint64 fallbackPeriodLength = bufferBlocks / EXECUTION_PERIOD_FALLBACK_DIVISOR;
