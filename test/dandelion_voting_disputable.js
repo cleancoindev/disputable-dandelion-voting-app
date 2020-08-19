@@ -76,7 +76,7 @@ contract('Dandelion Voting disputable', ([_, owner, voter51, voter49]) => {
     const receipt = await voting.newVote(script, CONTEXT, cast, { from: voter })
     const logs = decodeEvents(receipt, Voting.abi, 'StartVote')
     voteId = getEventArgument({ logs }, 'StartVote', 'voteId')
-    actionId = (await voting.getDisputableInfo(voteId))[0]
+    actionId = (await getVoteState(voting, voteId)).actionId;
 
     if (execute) {
       await voting.mockAdvanceBlocks(VOTING_DURATION_BLOCKS + EXECUTION_DELAY_BLOCKS)
@@ -88,12 +88,12 @@ contract('Dandelion Voting disputable', ([_, owner, voter51, voter49]) => {
     beforeEach(async () => await createVote({ voter: voter51, cast: false }))
 
     it('saves the agreement action data', async () => {
-      const { pausedAtBlock, pauseDurationBlocks, status } = await voting.getDisputableInfo(voteId)
+      const { pausedAtBlock, pauseDurationBlocks, voteStatus } = await getVoteState(voting, voteId)
 
       assertBn(actionId, 1, 'action ID does not match')
       assertBn(pausedAtBlock, 0, 'paused at does not match')
       assertBn(pauseDurationBlocks, 0, 'pause duration does not match')
-      assertBn(status, VOTE_STATUS.ACTIVE, 'vote status does not match')
+      assertBn(voteStatus, VOTE_STATUS.ACTIVE, 'vote status does not match')
     })
 
     it('registers a new action in the agreement', async () => {
@@ -120,9 +120,9 @@ contract('Dandelion Voting disputable', ([_, owner, voter51, voter49]) => {
     beforeEach(async () => await createVote({ voter: voter51, cast: true, execute: true }))
 
     it('changes the disputable state to closed', async () => {
-      const { actionId: voteActionId, pausedAtBlock, pauseDurationBlocks, status } = await voting.getDisputableInfo(voteId)
-      assertBn(status, VOTE_STATUS.EXECUTED, 'vote status does not match')
+      const { actionId: voteActionId, pausedAtBlock, pauseDurationBlocks, voteStatus } = await getVoteState(voting, voteId)
 
+      assertBn(voteStatus, VOTE_STATUS.EXECUTED, 'vote status does not match')
       assertBn(voteActionId, actionId, 'action ID does not match')
       assertBn(pausedAtBlock, 0, 'paused at does not match')
       assertBn(pauseDurationBlocks, 0, 'pause duration does not match')
@@ -160,9 +160,9 @@ contract('Dandelion Voting disputable', ([_, owner, voter51, voter49]) => {
     })
 
     it('pauses the vote', async () => {
-      const { actionId: voteActionId, pausedAtBlock, pauseDurationBlocks, status } = await voting.getDisputableInfo(voteId)
-      assertBn(status, VOTE_STATUS.PAUSED, 'vote status does not match')
+      const { actionId: voteActionId, pausedAtBlock, pauseDurationBlocks, voteStatus } = await getVoteState(voting, voteId)
 
+      assertBn(voteStatus, VOTE_STATUS.PAUSED, 'vote status does not match')
       assertBn(voteActionId, actionId, 'action ID does not match')
       assertBn(pausedAtBlock, challengeBlockNumber, 'paused at does not match')
       assertBn(pauseDurationBlocks, 0, 'pause duration does not match')
@@ -186,10 +186,10 @@ contract('Dandelion Voting disputable', ([_, owner, voter51, voter49]) => {
     })
 
     it('marks the vote as closed', async () => {
-      const { isOpen, isExecuted } = await getVoteState(voting, voteId)
+      const { isOpen, voteStatus } = await getVoteState(voting, voteId)
 
       assert.isFalse(isOpen, 'vote is open')
-      assert.isFalse(isExecuted, 'vote is executed')
+      assert.equal(voteStatus, VOTE_STATUS.PAUSED, 'vote is not paused')
     })
 
     it('canChallenge returns false', async () => {
@@ -218,9 +218,9 @@ contract('Dandelion Voting disputable', ([_, owner, voter51, voter49]) => {
     const itResumesTheVote = () => {
       it('resumes the vote', async () => {
         const expectedPauseDuration = currentBlock.sub(pauseBlockNumber)
-        const { actionId: voteActionId, pausedAtBlock, pauseDurationBlocks, status } = await voting.getDisputableInfo(voteId)
-        assertBn(status, VOTE_STATUS.ACTIVE, 'vote status does not match')
+        const { actionId: voteActionId, pausedAtBlock, pauseDurationBlocks, voteStatus } = await getVoteState(voting, voteId)
 
+        assertBn(voteStatus, VOTE_STATUS.ACTIVE, 'vote status does not match')
         assertBn(voteActionId, actionId, 'action ID does not match')
         assertBn(pausedAtBlock, pauseBlockNumber, 'paused at does not match')
         assertBn(pauseDurationBlocks, expectedPauseDuration, 'pause duration does not match')
@@ -240,10 +240,10 @@ contract('Dandelion Voting disputable', ([_, owner, voter51, voter49]) => {
       })
 
       it('marks the vote as open', async () => {
-        const { isOpen, isExecuted } = await getVoteState(voting, voteId)
+        const { isOpen, voteStatus } = await getVoteState(voting, voteId)
 
         assert.isTrue(isOpen, 'vote is not open')
-        assert.isFalse(isExecuted, 'vote is executed')
+        assert.equal(voteStatus, VOTE_STATUS.ACTIVE, 'vote is not active')
       })
 
       it('does not affect the voting period', async () => {
@@ -308,9 +308,9 @@ contract('Dandelion Voting disputable', ([_, owner, voter51, voter49]) => {
     const itCancelsTheVote = () => {
       it('cancels the vote', async () => {
         const expectedPauseDuration = currentBlock.sub(pauseBlock)
-        const { actionId: voteActionId, pausedAtBlock, pauseDurationBlocks, status } = await voting.getDisputableInfo(voteId)
-        assertBn(status, VOTE_STATUS.CANCELLED, 'vote status does not match')
+        const { actionId: voteActionId, pausedAtBlock, pauseDurationBlocks, voteStatus } = await getVoteState(voting, voteId)
 
+        assertBn(voteStatus, VOTE_STATUS.CANCELLED, 'vote status does not match')
         assertBn(voteActionId, actionId, 'action ID does not match')
         assertBn(pausedAtBlock, pauseBlock, 'paused at does not match')
         assertBn(pauseDurationBlocks, expectedPauseDuration, 'pause duration does not match')

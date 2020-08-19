@@ -53,7 +53,6 @@ contract DisputableDandelionVoting is IACLOracle, TokenManagerHook, IForwarderWi
     }
 
     struct Vote {
-        bool executed;
         uint64 startBlock;
         uint64 executionBlock;
         uint64 snapshotBlock;
@@ -211,7 +210,6 @@ contract DisputableDandelionVoting is IACLOracle, TokenManagerHook, IForwarderWi
         Vote storage vote_ = votes[_voteId];
         require(_canExecute(vote_), ERROR_CANNOT_EXECUTE);
 
-        vote_.executed = true;
         vote_.voteStatus = VoteStatus.Executed;
         _closeAgreementAction(vote_.actionId);
 
@@ -258,10 +256,8 @@ contract DisputableDandelionVoting is IACLOracle, TokenManagerHook, IForwarderWi
     * @return Vote power
     * @return Vote script
     */
-    function getVote(uint256 _voteId) external view voteExists(_voteId)
+    function getVote(uint256 _voteId) external view
         returns (
-            bool open,
-            bool executed,
             uint64 startBlock,
             uint64 executionBlock,
             uint64 snapshotBlock,
@@ -270,13 +266,14 @@ contract DisputableDandelionVoting is IACLOracle, TokenManagerHook, IForwarderWi
             uint256 votingPower,
             uint256 yea,
             uint256 nay,
-            bytes script
+            bytes script,
+            uint256 actionId,
+            uint64 pausedAtBlock,
+            uint64 pauseDurationBlocks,
+            VoteStatus voteStatus
         )
     {
-        Vote storage vote_ = votes[_voteId];
-
-        open = _isVoteOpen(vote_);
-        executed = vote_.executed;
+        Vote storage vote_ = _getVote(_voteId);
         startBlock = vote_.startBlock;
         executionBlock = vote_.executionBlock;
         snapshotBlock = vote_.snapshotBlock;
@@ -286,21 +283,21 @@ contract DisputableDandelionVoting is IACLOracle, TokenManagerHook, IForwarderWi
         yea = vote_.yea;
         nay = vote_.nay;
         script = vote_.executionScript;
-    }
-
-    function getDisputableInfo(uint256 _voteId) external view voteExists(_voteId)
-        returns (
-            uint256 actionId,
-            uint64 pausedAtBlock,
-            uint64 pauseDurationBlocks,
-            VoteStatus status
-        )
-    {
-        Vote storage vote_ = votes[_voteId];
         actionId = vote_.actionId;
         pausedAtBlock = vote_.pausedAtBlock;
         pauseDurationBlocks = vote_.pauseDurationBlocks;
-        status = vote_.voteStatus;
+        voteStatus = vote_.voteStatus;
+    }
+
+    /**
+    * @dev Returns whether vote #`_voteId` is open for voting
+    *      Initialization check is implicitly provided by `_isVoteOpen()`
+    * @param _voteId Id for vote
+    * @return True if the vote is still open
+    */
+    function isVoteOpen(uint256 _voteId) external view returns (bool) {
+        Vote storage vote_ = votes[_voteId];
+        return _isVoteOpen(vote_);
     }
 
     /**
@@ -343,7 +340,7 @@ contract DisputableDandelionVoting is IACLOracle, TokenManagerHook, IForwarderWi
     * @param _context Vote context
     */
     function forward(bytes _evmScript, bytes _context) external {
-        require(this.canForward(msg.sender, _evmScript), ERROR_CANNOT_FORWARD);
+        require(_canForward(msg.sender, _evmScript), ERROR_CANNOT_FORWARD);
         _newVote(_evmScript, _context, true);
     }
 
@@ -354,11 +351,8 @@ contract DisputableDandelionVoting is IACLOracle, TokenManagerHook, IForwarderWi
     * @param _evmScript EVM script being forwarded
     * @return True if the given address can create votes
     */
-    // TODO: Cross check with disputable voting
     function canForward(address _sender, bytes _evmScript) external view returns (bool) {
-        // TODO: Handle the case where a Disputable app doesn't have an Agreement set
-        // Note that `canPerform()` implicitly does an initialization check itself
-        return canPerform(_sender, CREATE_VOTES_ROLE, arr(_sender));
+        return _canForward(_sender, _evmScript);
     }
 
     // ACL Oracle fns
@@ -445,6 +439,15 @@ contract DisputableDandelionVoting is IACLOracle, TokenManagerHook, IForwarderWi
 
     // Internal fns
 
+    /*
+    * @dev Internal function to get a vote object
+    */
+    // TODO: Replace vote[] usages with this getter.
+    function _getVote(uint256 _voteId) internal view returns (Vote storage) {
+        require(_voteExists(_voteId), ERROR_NO_VOTE);
+        return votes[_voteId];
+    }
+
     /**
     * @dev Internal function to create a new vote
     * @return voteId id for newly created vote
@@ -505,23 +508,19 @@ contract DisputableDandelionVoting is IACLOracle, TokenManagerHook, IForwarderWi
     * @return True if the given vote can be executed, false otherwise
     */
     function _canExecute(Vote storage vote_) internal view returns (bool) {
-        if (vote_.executed) {
-            return false;
-        }
+        bool voteActive = vote_.voteStatus == VoteStatus.Active;
+        bool afterVoteExecutionBlock = getBlockNumber64() > _voteExecutionBlock(vote_);
 
-        if (_isVoteOpen(vote_)) {
-            return false;
-        }
+        return voteActive && afterVoteExecutionBlock && _votePassed(vote_);
+    }
 
-        if (getBlockNumber64() < _voteExecutionBlock(vote_)) {
-            return false;
-        }
-
-        if (vote_.voteStatus != VoteStatus.Active) {
-            return false;
-        }
-
-        return _votePassed(vote_);
+    function _canForward(address _sender, bytes _evmScript) internal view returns (bool) {
+        IAgreement agreement = _getAgreement();
+        // To make sure the sender address is reachable by ACL oracles, we need to pass it as an argument.
+        // ACL oracles are set for ANY_ENTITY, therefore there is no default way to know the original sender
+        // for an ACL oracle in case the CREATE_VOTES_ROLE permission was configured with one
+        // Note that `canPerform()` implicitly does an initialization check itself
+        return agreement != IAgreement(0) && canPerform(_sender, CREATE_VOTES_ROLE, arr(_sender));
     }
 
     /**
@@ -640,8 +639,10 @@ contract DisputableDandelionVoting is IACLOracle, TokenManagerHook, IForwarderWi
         uint64 fallbackPeriodLength = bufferBlocks / EXECUTION_PERIOD_FALLBACK_DIVISOR;
         bool senderLatestYeaVoteFallbackPeriodPassed = getBlockNumber64() > voteExecutionBlock.add(fallbackPeriodLength);
 
+        bool senderLatestYeaVoteExecuted = senderLatestYeaVote_.voteStatus == VoteStatus.Executed;
+
         return senderLatestYeaVoteNotPaused && senderLatestYeaVoteFailed && senderLatestYeaVoteExecutionBlockPassed
             || senderLatestYeaVoteNotPaused && senderLatestYeaVoteFallbackPeriodPassed
-            || senderLatestYeaVote_.executed;
+            || senderLatestYeaVoteExecuted;
     }
 }

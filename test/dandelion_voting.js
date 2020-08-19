@@ -13,6 +13,13 @@ const createdVoteId = receipt => getEventArgument(receipt, 'StartVote', 'voteId'
 
 const ANY_ADDR = '0xffffffffffffffffffffffffffffffffffffffff'
 
+const VOTE_STATUS = {
+  ACTIVE: 0,
+  PAUSED: 1,
+  CANCELLED: 2,
+  EXECUTED: 3
+}
+
 const VOTER_STATE = ['ABSENT', 'YEA', 'NAY'].reduce((state, key, index) => {
   state[key] = index
   return state
@@ -244,14 +251,16 @@ contract('Dandelion Voting App', ([root, holder1, holder2, holder20, holder29, h
           voteId = getEventArgument(receipt, 'StartVote', 'voteId')
           creator = getEventArgument(receipt, 'StartVote', 'creator')
           context = getEventArgument(receipt, 'StartVote', 'context')
-          actionId = (await voting.getDisputableInfo(voteId))[0]
+          actionId = (await voting.getVote(voteId)).actionId;
         })
 
         it('has correct state', async () => {
-          const { open, executed, startBlock, executionBlock, snapshotBlock, supportRequired, minAcceptQuorum, votingPower, yea, nay, script: execScript } = await voting.getVote(voteId)
+          const {
+            startBlock, executionBlock, snapshotBlock, supportRequired,
+            minAcceptQuorum, votingPower, yea, nay, script: execScript, voteStatus
+          } = await voting.getVote(voteId)
 
-          assert.isTrue(open, 'vote should be open')
-          assert.isFalse(executed, 'vote should not be executed')
+          assert.isTrue(await voting.isVoteOpen(voteId), 'vote should be open')
           assert.equal(startBlock.toString(), await latestBlock(), 'start block should be correct')
           assert.equal(executionBlock.toString(), startBlock.toNumber() + executionDelayBlocks + durationBlocks, 'execution block should be correct')
           assert.equal(creator, holder51, 'creator should be correct')
@@ -262,6 +271,7 @@ contract('Dandelion Voting App', ([root, holder1, holder2, holder20, holder29, h
           assert.equal(yea, 0, 'initial yea should be 0')
           assert.equal(nay, 0, 'initial nay should be 0')
           assert.equal(execScript, script, 'script should be correct')
+          assert.equal(voteStatus, VOTE_STATUS.ACTIVE, 'vote should be active')
           assert.equal(context, expectedContext, 'should have returned correct context')
           assert.equal(await voting.getVoterState(voteId, nonHolder), VOTER_STATE.ABSENT, 'nonHolder should not have voted')
         })
@@ -717,7 +727,7 @@ contract('Dandelion Voting App', ([root, holder1, holder2, holder20, holder29, h
     it('prevents voting if token has no holder', async () => {
       const voteId = createdVoteId(await voting.newVote(EMPTY_CALLS_SCRIPT, '0x', true))
 
-      const { open: canVote } = await voting.getVote(voteId)
+      const canVote = await voting.isVoteOpen(voteId)
       assert.isFalse(canVote)
       await assertRevert(voting.vote(voteId, true, { from: holder1 }), errors.DANDELION_VOTING_CANNOT_VOTE)
     })
@@ -751,10 +761,11 @@ contract('Dandelion Voting App', ([root, holder1, holder2, holder20, holder29, h
 
       await voting.vote(voteId, true, { from: holder1 })
 
-      const { open, executed } = await voting.getVote(voteId)
+      const { voteStatus } = await voting.getVote(voteId)
+      const open = await voting.isVoteOpen(voteId)
 
       assert.isTrue(open, 'vote should be open')
-      assert.isFalse(executed, 'vote should not have been executed')
+      assert.equal(voteStatus, VOTE_STATUS.ACTIVE, 'vote should be active')
     })
   })
 
@@ -787,18 +798,20 @@ contract('Dandelion Voting App', ([root, holder1, holder2, holder20, holder29, h
       await voting.vote(voteId, true, { from: holder1 })
       await voting.vote(voteId, true, { from: holder2 })
 
-      const { open, executed } = await voting.getVote(voteId)
+      const { voteStatus } = await voting.getVote(voteId)
+      const open = await voting.isVoteOpen(voteId)
 
       assert.isTrue(open, 'vote should be open')
-      assert.isFalse(executed, 'vote should not have been executed')
+      assert.equal(voteStatus, VOTE_STATUS.ACTIVE, 'vote should be active')
     })
 
     it('creating vote as holder2 does not execute vote', async () => {
       const voteId = createdVoteId(await voting.newVote(EMPTY_CALLS_SCRIPT, '0x', true, { from: holder2 }))
-      const { open, executed } = await voting.getVote(voteId)
+      const { voteStatus } = await voting.getVote(voteId)
+      const open = await voting.isVoteOpen(voteId)
 
       assert.isTrue(open, 'vote should be open')
-      assert.isFalse(executed, 'vote should not have been executed')
+      assert.equal(voteStatus, VOTE_STATUS.ACTIVE, 'vote should be active')
     })
   })
 
