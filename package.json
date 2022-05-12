@@ -27,7 +27,7 @@
   "keywords": [],
   "description": "Voting app for dandelion orgs",
   "dependencies": {
-    "@1hive/apps-token-manager": "2.1.0",
+    "@1hive/apps-token-manager": "2.2.0",
     "@aragon/minime": "1.0.0",
     "@aragon/os": "4.4.0"
   },
